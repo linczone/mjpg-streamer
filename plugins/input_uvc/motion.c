@@ -1,35 +1,47 @@
-
+/*************************************************************************
+	> File Name: motion.c
+	> Author: chad
+	> Mail: linczone@163.com 
+	> Created Time: 2015年07月14日 星期二 15时57分31秒
+    > 本项目主要针对嵌入式linux环境，为了提高系统运行效率，该运动检测模块
+ 直接集成在input_uvc.so中。通过命令行配制项控制运行检测的参数，处理完成的
+ 图像直接压缩为jpeg格式传递到输出模块。
+    > 运动检测的原理是：YUV图像采集 -> 提取Y分量生成单通道灰度图像 -> 与参考帧
+ 执行图像减法运算 -> 噪声过滤，二值化处理 -> 图像侵蚀处理 -> 图像膨胀处理 -> 计算
+ 图像变化量 -> 超过运动量阈值则计算运动位置 -> 运动部分使用矩形框标识 -> 添加
+ 时标等文本信息 -> jpeg压缩 -> 图像输出。
+ ************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include "alg.h"
 #include "draw.h"
+
 #define uchar unsigned char 
 #define uint unsigned int
 
 
-
 typedef struct SMOTION{
-	uchar *background;//存储单通道的灰度图
-	uchar *motion;//运动图，某个像素值不为0说明是运动部分
-	uchar *binpic;//二值化图像
-	uchar noise;//噪声值
-	uchar flag;//图像是否变化的标志
-	uint  threshold;//阈值
+	uchar *background;  //存储单通道的灰度图
+	uchar *motion;      //运动图，某个像素值不为0说明是运动部分
+	uchar *binpic;      //二值化图像
+	uchar noise;        //噪声值
+	uchar flag;         //图像是否变化的标志
+	uint  threshold;    //阈值
 	uint  width;
 	uint  height;
-	uint  timecount;//运动保持计时器
+	uint  timecount;    //运动保持计时器
 }SMOTION;
 
-#define MAX_TIMECOUNT 10
-#define BRIGHTNESS      200 //亮度调整值
+#define MAX_TIMECOUNT   10
 
-static int  MAX_NOISE=20;  //背景噪声值
+static int  MAX_NOISE=20;       //背景噪声值
 static int  MAX_THRESHOLD=100;
-static unsigned char *gBuf;//该buf平均分三段，SMOTION结构中的background，motion，motion动态指向某一段
+static unsigned char *gBuf;     //该buf平均分三段，SMOTION结构中的background，motion，motion动态指向某一段
 static SMOTION motion;
-static int flag_init = -1;//初始化标志 -1未初始化 other 初始化
+static int flag_init = -1;      //初始化标志 -1未初始化 other 初始化
 
 #define MAX2(x, y) ((x) > (y) ? (x) : (y))
 #define MAX3(x, y, z) ((x) > (y) ? ((x) > (z) ? (x) : (z)) : ((y) > (z) ? (y) : (z)))
@@ -38,52 +50,15 @@ static int flag_init = -1;//初始化标志 -1未初始化 other 初始化
 #define DIFF(x, y)         (ABS((x) - (y)))
 #define NDIFF(x, y)        (ABS(x) * NORM/(ABS(x) + 2 * DIFF(x,y)))
 
-/*yuv4:2:2格式转换为rgb24格式*/
 /*
-int convert_yuv_to_rgb_pixel(int y, int u, int v)
-{
-	uint pixel32 = 0;
-	uchar *pixel = (uchar *)&pixel32;
-	int r, g, b;
-	r = y + (1.370705 * (v-128));
-	g = y - (0.698001 * (v-128)) - (0.337633 * (u-128));
-	b = y + (1.732446 * (u-128));
-	if(r > 255) r = 255;
-	if(g > 255) g = 255;
-	if(b > 255) b = 255;
-	if(r < 0) r = 0;
-	if(g < 0) g = 0;
-	if(b < 0) b = 0;
-	pixel[0] = r * 220 / 256;
-	pixel[1] = g * 220 / 256;
-	pixel[2] = b * 220 / 256;
-	
-	return pixel32;
-}*/
-/*
- * yuv4:2:2格式转换为rgb24格式
- * 由于浮点运算速度太慢，所以，此处使用近似值计算
+ *   函数名： convert_yuv_to_rgb_buffe
+ * ----------------------------------------------
+ *   yuv422 格式图像转换为 rgb24 格式
+ *
+ *   width : 图像宽度
+ *   height: 图像高度
  */
- /*
-int convert_yuv_to_rgb_pixel(int y, int u, int v)
-{	  
-	uint pixel32 = 0;
-	uchar *pixel = (uchar *)&pixel32;
-	int r, g, b;
-	r = (y + (359 * v)) >> 8;
-	g = (y - (88 * u) - (183 * v)) >> 8;
-	b = (y + (454 * u)) >> 8;
-
-	pixel[0] = (r > 255) ? 255 : ((r < 0) ? 0 : r);
-	pixel[1] = (g > 255) ? 255 : ((g < 0) ? 0 : g);
-	pixel[2] = (b > 255) ? 255 : ((b < 0) ? 0 : b);
-	
-	return pixel32;
-}
-*/
-
-
-int convert_yuv_to_rgb_buffer(uchar *yuv, uchar *rgb, uint width,uint height)
+void convert_yuv_to_rgb_buffer(uchar *yuv, uchar *rgb, uint width, uint height)
 {
 	int x,z=0;
 
@@ -113,29 +88,16 @@ int convert_yuv_to_rgb_buffer(uchar *yuv, uchar *rgb, uint width,uint height)
 			yuv += 4;
 		}
 	}
-	return 0;
 }
-//yuv 转换为灰度图像
-int convert_yuv_to_gray(uchar *yuv, uchar *rgb, uint width,uint height)
-{
-	uint in, out = 0;
-	int y0, y1;
-	for(in = 0; in < width * height * 2; in += 4) {
-		y0 = yuv[in + 0];
-		y1 = yuv[in + 2];
-
-		rgb[out++] = y0;
-		rgb[out++] = y0;
-		rgb[out++] = y0;//rgb的一个像素
-		
-		rgb[out++] = y1;
-		rgb[out++] = y1;
-		rgb[out++] = y1;
-	}
-	return 0;
-}
-//yuv 转换为灰度图像 单通道
-int convert_yuv_to_gray0(uchar *yuv, uchar *gray, uint width,uint height)
+/*
+ *  函数名： convert_yuv_to_gray0
+ * --------------------------------------------------
+ *  yuv422 转换为单通道灰度图像
+ *
+ *  width   : 图像宽度
+ *  height  ：图像高度
+ */
+int convert_yuv_to_gray0(uchar *yuv, uchar *gray, uint width, uint height)
 {
 	uint in, out = 0;
 	int y0, y1;
@@ -150,12 +112,19 @@ int convert_yuv_to_gray0(uchar *yuv, uchar *gray, uint width,uint height)
 	return 0;
 }
 
+/*
+ *  函数名： motion_init
+ *  ------------------------------------------------
+ *  运动检测模块参数初始化，该函数需要在模块调用前首先调用
+ * 
+ *  width   : 图像宽度
+ *  height  : 图像高度
+ */
 int motion_init( uint width, uint height )
 {
 	memset( &motion, 0, sizeof(motion));
 	gBuf = (uchar*)calloc( 1, 3*width * height );
-	if( gBuf == NULL)
-	{
+	if( gBuf == NULL) {
 		printf("no enough mem ,malloc fail!\n");
 		return -1;
 	}
@@ -170,10 +139,14 @@ int motion_init( uint width, uint height )
 	motion.noise = MAX_NOISE;
 	return 0;
 }
+/*
+ *  函数名：motion_destroy
+ * ---------------------------------
+ *  注销资源
+ */
 int motion_destroy( void )
 {
-	if( gBuf )	
-	{
+	if( gBuf ) {
 		free( gBuf );
 		gBuf = NULL;
 		motion.background = NULL;
@@ -183,8 +156,16 @@ int motion_destroy( void )
 
 	return 0;
 }
-/* Erodes a 3x3 box */
-//3*3 侵蚀
+/* 函数名: erode9
+ * -------------------------------------------
+ * 3x3 box 侵蚀 
+ *
+ * img      : 图像数据，直接修改输入数据
+ * width    : 图像宽度
+ * height   : 图像高度
+ * buffer   : 3*width 大小的临时buf
+ * flag     : 0 or 255 表示背景颜色，比如图像为白底，则flag=0
+ */
 static int erode9(unsigned char *img, int width, int height, void *buffer, unsigned char flag)
 {    
 	int y, i, sum = 0;    
@@ -220,8 +201,15 @@ static int erode9(unsigned char *img, int width, int height, void *buffer, unsig
 	return sum;
 }
 
-//3*3 膨胀
-/* Dilates a 3x3 box */
+/* 函数名: dilate9
+ * -------------------------------------------
+ * 3x3 box 膨胀
+ *
+ * img      : 图像数据，直接修改输入数据
+ * width    : 图像宽度
+ * height   : 图像高度
+ * buffer   : 3*width 大小的临时buf
+ */
 static int dilate9(unsigned char *img, int width, int height, void *buffer)
 {    
 	/* - row1, row2 and row3 represent lines in the temporary buffer      
@@ -288,10 +276,19 @@ static int dilate9(unsigned char *img, int width, int height, void *buffer)
 	}        
 	return sum;
 }
-
-//标识变化区域，同时该区域还是一个计数器，每次更新都要将标记位置减1 当标志位置减为0时，说明该位置已经不在运动
-//由于拍照时间很快，如果单色物体在摄像区域内做平移运动时，如果不使用计数器方式，会造成检测到的运动部位只存在与交界区域。
-//为了克服上面的问题，使用延迟计数方式，保证能标识出完整的变化部分
+/*
+ *  函数名：pic_mark
+ * ----------------------------------------------------------------
+ *  标识变化区域，同时该区域还是一个计数器，每次更新都要将标记位置减1, 
+ *  当标志位置减为0时，说明该位置已经不再运动,由于拍照时间很快，如果单色
+ *  物体在摄像区域内做平移运动时，如果不使用计数器方式，会造成检测到的运
+ *  动部位只存在与交界区域。为了克服上面的问题，使用延迟计数方式，保证能
+ *  标识出完整的变化部分.
+ *
+ *  motion  : 输入的图像
+ *  mark    : 掩码图像，掩码图像与输入的运动图像为尺寸相同的单通道图像
+ *  size    : 图像尺寸 = width * height
+ */
 int pic_mark( unsigned char *motion, unsigned char *mark, unsigned int size )
 {
     int i=0;
