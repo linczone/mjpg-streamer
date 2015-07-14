@@ -1,0 +1,39 @@
+---- resolutions Matches (7 in 2 files) ----
+Input_gspcav1.c (plugins\input_gspcav1):45
+} resolutions[] = {
+  { "QSIF", 160,  120  },
+  { "QCIF", 176,  144  },
+Input_gspcav1.c (plugins\input_gspcav1):172
+        /* try to find the resolution in lookup table "resolutions" */
+        for ( i=0; i < LENGTH_OF(resolutions); i++ ) {
+          if ( strcmp(resolutions[i].string, optarg) == 0 ) {
+            width  = resolutions[i].width;
+            height = resolutions[i].height;
+          }
+        }
+Input_gspcav1.c (plugins\input_gspcav1):295
+  for ( i=0; i < LENGTH_OF(resolutions); i++ ) {
+    fprintf(stderr, "%s ", resolutions[i].string);
+    if ( (i+1)%6 == 0)
+      fprintf(stderr, "\n                          ");
+Input_uvc.c (plugins\input_uvc):54
+ * UVC resolutions mentioned at: (at least for some webcams)
+ * http://www.quickcamteam.net/hcl/frame-format-matrix/
+ */
+Input_uvc.c (plugins\input_uvc):60
+} resolutions[] = {
+  { "QSIF", 160,  120  },
+  { "QCIF", 176,  144  },
+Input_uvc.c (plugins\input_uvc):208
+        /* try to find the resolution in lookup table "resolutions" */
+        for ( i=0; i < LENGTH_OF(resolutions); i++ ) {
+          if ( strcmp(resolutions[i].string, optarg) == 0 ) {
+            width  = resolutions[i].width;
+            height = resolutions[i].height;
+          }
+        }
+Input_uvc.c (plugins\input_uvc):684
+  for ( i=0; i < LENGTH_OF(resolutions); i++ ) {
+    fprintf(stderr, "%s ", resolutions[i].string);
+    if ( (i+1)%6 == 0)
+      fprintf(stderr, "\n                          ");
