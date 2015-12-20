@@ -1,3 +1,5 @@
+/*(((((((((((9*/
+
 /*******************************************************************************
 #                                                                              #
 #      MJPG-streamer allows to stream JPG frames from an input-plugin          #
